@@ -1,64 +1,122 @@
 import { today } from "./review";
+import * as XLSX from "xlsx";
 
-/**
- * Parse a TSV string (copy-pasted from Excel) into problem objects.
- * Supports both English and Chinese headers via fuzzy matching.
- */
-export const parseTSV = (text) => {
-  const lines = text.split("\n").map((l) => l.split("\t"));
-  if (lines.length < 2) return [];
+// ========== Header matching ==========
 
-  const headers = lines[0].map((h) => h.trim().toLowerCase());
+const findCol = (headers, ...keys) => {
+  for (const k of keys) {
+    const i = headers.findIndex((h) => h.includes(k));
+    if (i >= 0) return i;
+  }
+  return -1;
+};
 
-  const find = (...keys) => {
-    for (const k of keys) {
-      const i = headers.findIndex((h) => h.includes(k));
-      if (i >= 0) return i;
-    }
-    return -1;
-  };
+// ========== Detect LeetCode title pattern: "123. Problem Name" ==========
 
-  const iTitle = find("title", "\u9898\u76ee");
-  const iCat = find("category", "\u5206\u7c7b");
-  const iSub = find("subcategory", "sub", "\u5b50\u5206\u7c7b");
-  const iDiff = find("difficulty", "diff", "\u96be\u5ea6");
-  const iComp = find("complexity", "\u590d\u6742\u5ea6");
-  const iTags = find("tags", "tag", "\u6807\u7b7e");
-  const iKey = find("keypoints", "key", "\u8981\u70b9");
-  const iApp = find("approach", "\u601d\u8def");
-  const iPit = find("pitfalls", "pitfall", "\u6613\u9519");
-  const iHi = find("highlights", "highlight", "\u4eae\u70b9");
-  const iIntv = find("interview");
-  const iC1 = find("solution1", "code1", "\u65b9\u6cd51");
-  const iC2 = find("solution2", "code2", "\u65b9\u6cd52");
+function isLCTitle(val) {
+  if (!val) return false;
+  const s = String(val).trim();
+  // Must start with number + period, and contain English letters (not Chinese)
+  return /^\d+[\.\。]\s*[A-Z]/.test(s) && s.length > 5;
+}
+
+// ========== Parse rows into problems ==========
+
+function rowsToProblems(rows, headers) {
+  if (rows.length < 2) return [];
+
+  const h = headers || rows[0].map((v) => String(v || "").trim().toLowerCase());
+
+  // Header-based column matching
+  const iApp = findCol(h, "解法+思路");
+  const iComp = findCol(h, "复杂度", "complexity");
+  // Exact "难度" (not "难度/要点")
+  const iDiff = h.findIndex((v) => {
+    const t = v.trim();
+    return (t === "难度" || t === "difficulty") && !t.includes("/");
+  });
+  const iKey = findCol(h, "难度/要点", "要点", "keypoints");
+  const iCat = findCol(h, "题型", "category");
+  // "思路" column — must match exact "思路", not "解法+思路"
+  const iApproach2 = h.findIndex((v) => v.trim() === "思路");
+  const iPit = findCol(h, "易错", "pitfalls");
+  const iIntv = findCol(h, "interview");
+  const iC1 = findCol(h, "方法1", "solution1", "code1");
+  const iC2 = findCol(h, "方法2", "solution2", "code2");
 
   const results = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const row = lines[i];
-    if (row.length < 2) continue;
-    const g = (idx) => (idx >= 0 && row[idx] ? row[idx].trim() : "");
-    const title = g(iTitle) || g(0);
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length < 2) continue;
+
+    const g = (idx) => (idx >= 0 && row[idx] != null ? String(row[idx]).trim() : "");
+
+    // Scan the row for the cell that looks like "1456. Maximum Number of Vowels..."
+    let title = "";
+    let titleIdx = -1;
+    for (let c = 0; c < Math.min(row.length, 12); c++) {
+      const val = row[c] != null ? String(row[c]).trim() : "";
+      if (isLCTitle(val)) {
+        title = val;
+        titleIdx = c;
+        break;
+      }
+    }
+
+    // Skip rows without a valid LC title (section headers, blank rows, etc.)
     if (!title) continue;
 
+    // Parse category and subcategory from "思路" column: "滑动窗口----定长滑动窗口（注意...）"
+    const approachRaw2 = g(iApproach2);
+    let category = "Uncategorized";
+    let subCategory = "";
+    
+    if (approachRaw2) {
+      if (approachRaw2.includes("----")) {
+        // Has subcategory: "滑动窗口----定长滑动窗口"
+        const dashParts = approachRaw2.split("----").map((s) => s.trim());
+        category = dashParts[0] || "Uncategorized";
+        if (dashParts[1]) {
+          subCategory = dashParts[1].replace(/[（(].+$/, "").trim();
+        }
+      } else {
+        // No subcategory, entire value is the category
+        category = approachRaw2.replace(/[（(].+$/, "").trim() || "Uncategorized";
+      }
+    }
+
+    // Tags from "题型" column, split by ||
+    const tagsRaw = g(iCat) || "";
+    const tags = tagsRaw
+      .split(/\|\||｜｜/)
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+
+    // Build approach from "解法+思路" column only (not "思路" which is category info)
+    const approach = g(iApp) || "";
+
     const solutions = [
-      g(iC1) && { label: "Solution 1", code: g(iC1), lang: "python" },
-      g(iC2) && { label: "Solution 2", code: g(iC2), lang: "python" },
+      g(iC1) && { label: "Solution 1", code: g(iC1), lang: "java" },
+      g(iC2) && { label: "Solution 2", code: g(iC2), lang: "java" },
     ].filter(Boolean);
 
     results.push({
-      id: Date.now().toString() + i,
+      id: Date.now().toString() + "-" + i,
       title,
-      category: g(iCat) || "Uncategorized",
-      subCategory: g(iSub) || "",
-      difficulty: g(iDiff) || "Medium",
+      _titleIdx: titleIdx, // temp, used for hyperlink extraction
+      category,
+      subCategory,
+      difficulty: normalizeDifficulty(g(iDiff)),
       complexity: g(iComp) || "",
-      tags: (g(iTags) || "").split(/[,，]/).map((t) => t.trim()).filter(Boolean),
+      tags,
       keyPoints: g(iKey) || "",
-      approach: g(iApp) || "",
+      approach: approach || "",
       pitfalls: g(iPit) || "",
-      highlights: g(iHi) || "",
-      interviewIntro: g(iIntv) || "",
+      interviewClarify: "",
+      interviewBrute: "",
+      interviewOptimal: "",
+      interviewWalkthrough: g(iIntv) || "",
       solutions,
       reviewHistory: [],
       nextReview: today(),
@@ -69,9 +127,83 @@ export const parseTSV = (text) => {
   }
 
   return results;
+}
+
+function normalizeDifficulty(raw) {
+  if (!raw) return "Medium";
+  const lower = raw.toLowerCase();
+  if (lower.includes("easy") || lower.includes("简单")) return "Easy";
+  if (lower.includes("hard") || lower.includes("困难")) return "Hard";
+  if (lower.includes("medium") || lower.includes("中等")) return "Medium";
+  return "Medium";
+}
+
+// ========== Parse Excel (.xlsx / .xls) ==========
+
+export const parseExcel = (arrayBuffer, sheetCategory) => {
+  const workbook = XLSX.read(arrayBuffer, { type: "array" });
+  const allProblems = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+
+    // Extract hyperlinks from cells
+    const hyperlinks = {};
+    for (const cellAddr in sheet) {
+      if (cellAddr[0] === "!") continue;
+      const cell = sheet[cellAddr];
+      if (cell && cell.l && cell.l.Target) {
+        hyperlinks[cellAddr] = cell.l.Target;
+      }
+    }
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (rows.length < 2) continue;
+
+    const headers = rows[0].map((v) => String(v || "").trim().toLowerCase());
+    const problems = rowsToProblems(rows, headers);
+
+    // Attach URLs and categories
+    problems.forEach((p) => {
+      // Find hyperlink by matching cell value to title
+      if (p._titleIdx >= 0) {
+        const colLetter = XLSX.utils.encode_col(p._titleIdx);
+        // Search all rows for this title's hyperlink
+        for (let r = 1; r <= rows.length; r++) {
+          const cellRef = colLetter + r;
+          if (hyperlinks[cellRef]) {
+            const cell = sheet[cellRef];
+            if (cell && String(cell.v || "").trim() === p.title) {
+              p.url = hyperlinks[cellRef];
+              const slugMatch = p.url.match(/\/problems\/([^/]+)/);
+              if (slugMatch) p.titleSlug = slugMatch[1];
+              break;
+            }
+          }
+        }
+      }
+      delete p._titleIdx;
+
+      if (sheetCategory && p.category === "Uncategorized") {
+        p.category = sheetName;
+      }
+    });
+
+    allProblems.push(...problems);
+  }
+
+  return allProblems;
 };
 
-/** Download all problems as a JSON backup file */
+// ========== Parse TSV ==========
+
+export const parseTSV = (text) => {
+  const lines = text.split("\n").map((l) => l.split("\t"));
+  return rowsToProblems(lines, null);
+};
+
+// ========== JSON export ==========
+
 export const exportJSON = (problems) => {
   const blob = new Blob([JSON.stringify(problems, null, 2)], {
     type: "application/json",
@@ -83,7 +215,8 @@ export const exportJSON = (problems) => {
   URL.revokeObjectURL(a.href);
 };
 
-/** Merge imported JSON into existing problems (dedup by title) */
+// ========== JSON import (merge) ==========
+
 export const mergeJSON = (jsonText, existingProblems) => {
   const data = JSON.parse(jsonText);
   if (!Array.isArray(data) || !data.length) {

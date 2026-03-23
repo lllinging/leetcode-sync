@@ -3,6 +3,7 @@ import { useProblems } from "../context/ProblemsContext";
 import { isDue, REVIEW_INTERVALS } from "../utils/review";
 import { DIFFICULTIES, DIFF_COLORS, CATEGORIES } from "../utils/constants";
 import EditField from "./EditField";
+import InterviewGuide from "./InterviewGuide";
 
 export default function ProblemCard({ problem: p }) {
   const {
@@ -35,13 +36,33 @@ export default function ProblemCard({ problem: p }) {
     if (solIdx >= newSols.length) setSolIdx(newSols.length - 1);
   };
 
+  const leetcodeUrl = p.url || (p.titleSlug ? `https://leetcode.com/problems/${p.titleSlug}/` : null);
+
+  // Shared inline styles for expanded sections
+  const sectionGap = { marginTop: 16 };
+  const divider = { borderTop: "1px solid #1e1e2e", marginTop: 18, paddingTop: 18 };
+
   return (
     <div className={`card problem-card ${due ? "due" : ""}`}>
       {/* Header */}
       <div className="problem-header">
         <div className="problem-info">
           <div className="problem-title-row">
-            <span className="problem-title">{p.title}</span>
+            {leetcodeUrl ? (
+              <a
+                href={leetcodeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="problem-title"
+                style={{ color: "#e0e0e0", textDecoration: "none", borderBottom: "1px dashed #6c5ce7" }}
+                onMouseEnter={(e) => (e.target.style.color = "#a29bfe")}
+                onMouseLeave={(e) => (e.target.style.color = "#e0e0e0")}
+              >
+                {p.title}
+              </a>
+            ) : (
+              <span className="problem-title">{p.title}</span>
+            )}
             <span className="tag" style={{ background: DIFF_COLORS[p.difficulty] + "22", color: DIFF_COLORS[p.difficulty] }}>{p.difficulty}</span>
             {due && <span className="tag tag-due">Due</span>}
             {p.aiGenerated && <span className="ai-tag">AI Synced</span>}
@@ -94,7 +115,7 @@ export default function ProblemCard({ problem: p }) {
             </div>
             <div>
               <label className="field-label">Tags (comma separated)</label>
-              <input className="input" value={(p.tags || []).join(", ")} onChange={(e) => upd({ tags: e.target.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean) })} />
+              <input className="input" value={(p.tags || []).join(", ")} onChange={(e) => upd({ tags: e.target.value.split(/[,]/).map((t) => t.trim()).filter(Boolean) })} />
             </div>
           </div>
           <button className="btn btn-sm btn-danger" onClick={() => { if (confirm("Delete this problem?")) deleteProblem(p.id); }}>Delete</button>
@@ -103,31 +124,38 @@ export default function ProblemCard({ problem: p }) {
 
       {/* Expanded content */}
       {expanded && (
-        <div className="problem-detail">
+        <div className="problem-detail" style={{ paddingTop: 6 }}>
+
+          {/* --- Notes section --- */}
           {isEditing ? (
             <div>
               <EditField label="Approach" value={p.approach} onChange={(v) => upd({ approach: v })} area aiFlag={p.aiGenerated} />
-              <div className="grid-2">
-                <EditField label="Key Points" value={p.keyPoints} onChange={(v) => upd({ keyPoints: v })} area aiFlag={p.aiGenerated} />
-                <EditField label="Pitfalls" value={p.pitfalls} onChange={(v) => upd({ pitfalls: v })} area aiFlag={p.aiGenerated} />
-              </div>
-              <EditField label="Highlights" value={p.highlights} onChange={(v) => upd({ highlights: v })} aiFlag={p.aiGenerated} />
-              <EditField label="Interview Intro" value={p.interviewIntro} onChange={(v) => upd({ interviewIntro: v })} area aiFlag={p.aiGenerated} />
+              <EditField label="Key Points" value={p.keyPoints} onChange={(v) => upd({ keyPoints: v })} area aiFlag={p.aiGenerated} />
+              <EditField label="Pitfalls" value={p.pitfalls} onChange={(v) => upd({ pitfalls: v })} area aiFlag={p.aiGenerated} />
             </div>
           ) : (
             <div>
-              <div className="grid-2">
-                <div><div className="section-label">Approach</div><div className="field-text">{p.approach || "(empty)"}</div></div>
-                <div><div className="section-label">Pitfalls</div><div className="field-text text-danger">{p.pitfalls || "(empty)"}</div></div>
+              <div style={sectionGap}>
+                <div className="section-label">Approach</div>
+                <div className="field-text">{p.approach || "(empty)"}</div>
               </div>
-              {p.keyPoints && <div className="field-block"><div className="section-label">Key Points</div><div className="field-text">{p.keyPoints}</div></div>}
-              {p.highlights && <div className="field-block"><div className="section-label">Highlights</div><div className="field-text text-warning">{p.highlights}</div></div>}
-              {p.interviewIntro && <div className="field-block"><div className="section-label">Interview Intro</div><div className="field-text text-purple italic">{p.interviewIntro}</div></div>}
+              {p.keyPoints && (
+                <div style={sectionGap}>
+                  <div className="section-label">Key Points</div>
+                  <div className="field-text">{p.keyPoints}</div>
+                </div>
+              )}
+              {p.pitfalls && (
+                <div style={sectionGap}>
+                  <div className="section-label">Pitfalls</div>
+                  <div className="field-text text-danger">{p.pitfalls}</div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Code section */}
-          <div className="code-section">
+          {/* --- Code section --- */}
+          <div style={divider}>
             <div className="code-tabs">
               <div className="code-tab-list">
                 {p.solutions.map((s, i) => (
@@ -143,7 +171,11 @@ export default function ProblemCard({ problem: p }) {
               <div className="grid-2">{p.solutions.map((s, i) => (
                 <div key={i}>
                   <div className="code-label">{s.label}</div>
-                  {isEditing ? <textarea className="input textarea code-textarea" value={s.code} onChange={(e) => updSolution(i, { code: e.target.value })} /> : <pre className="code-block">{s.code || "No code yet"}</pre>}
+                  {isEditing ? (
+                    <textarea className="input textarea code-textarea" value={s.code} onChange={(e) => updSolution(i, { code: e.target.value })} />
+                  ) : (
+                    <pre className="code-block" style={{ maxHeight: "none", overflow: "visible" }}>{s.code || "No code yet"}</pre>
+                  )}
                 </div>
               ))}</div>
             ) : (
@@ -155,33 +187,39 @@ export default function ProblemCard({ problem: p }) {
                     {p.solutions.length > 1 && <button className="btn btn-sm btn-danger" onClick={() => removeSolution(solIdx)}>Remove</button>}
                   </div>
                 )}
-                {isEditing ? <textarea className="input textarea code-textarea" value={p.solutions[solIdx]?.code || ""} onChange={(e) => updSolution(solIdx, { code: e.target.value })} /> : <pre className="code-block">{p.solutions[solIdx]?.code || "No code yet"}</pre>}
+                {isEditing ? (
+                  <textarea className="input textarea code-textarea" value={p.solutions[solIdx]?.code || ""} onChange={(e) => updSolution(solIdx, { code: e.target.value })} />
+                ) : (
+                  <pre className="code-block" style={{ maxHeight: "none", overflow: "visible" }}>{p.solutions[solIdx]?.code || "No code yet"}</pre>
+                )}
               </div>
             )}
           </div>
 
-          {/* Review status */}
-          <div className="review-status">
-            <div className="review-info">
-              Stage <span className="text-primary">{p.reviewStage}/{REVIEW_INTERVALS.length}</span>
-              {" | "}Next: <span className={due ? "text-danger" : "text-success"}>{p.nextReview}</span>
-              {" | "}Reviewed {p.reviewHistory.length}x
-            </div>
-            {due && (
-              <div className="review-buttons">
-                <span className="review-label">Rating:</span>
-                {[
-                  { q: 1, l: "Forgot", c: "#e17055" },
-                  { q: 2, l: "Vague", c: "#e17055" },
-                  { q: 3, l: "Okay", c: "#fdcb6e" },
-                  { q: 4, l: "Good", c: "#00b894" },
-                  { q: 5, l: "Easy", c: "#00b894" },
-                ].map(({ q, l, c }) => (
-                  <button key={q} className="review-btn" style={{ borderColor: c + "44", background: c + "11", color: c }} onClick={() => handleReview(p.id, q)}>{l}</button>
-                ))}
-              </div>
-            )}
+          {/* --- Interview guide --- */}
+          <div style={divider}>
+            <InterviewGuide problem={p} isEditing={isEditing} onUpdate={upd} />
           </div>
+
+          {/* --- Review status --- */}
+          <div style={divider}>
+            <div className="review-status">
+              <div className="review-info">
+                Stage <span className="text-primary">{p.reviewStage}/{REVIEW_INTERVALS.length}</span>
+                {" | "}Next: <span className={due ? "text-danger" : "text-success"}>{p.nextReview}</span>
+                {" | "}Reviews: {p.reviewHistory?.length || 0}
+              </div>
+              {due && (
+                <div className="review-buttons">
+                  <span className="review-prompt">How well did you recall?</span>
+                  {[1, 2, 3, 4, 5].map((q) => (
+                    <button key={q} className={`btn btn-sm ${q >= 3 ? "btn-success" : "btn-danger"}`} onClick={() => handleReview(p.id, q)}>{q}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
         </div>
       )}
     </div>
