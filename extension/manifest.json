@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "LeetCode Notebook Sync",
+  "version": "1.0",
+  "description": "Auto-sync LeetCode AC submissions to your notebook via local Ollama analysis",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "https://leetcode.cn/*",
+    "http://localhost:11434/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/problems/*", "https://leetcode.cn/problems/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html" }
+}
