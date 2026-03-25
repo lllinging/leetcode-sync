@@ -16,8 +16,13 @@ const findCol = (headers, ...keys) => {
 function isLCTitle(val) {
   if (!val) return false;
   const s = String(val).trim();
-  // Must start with number + period, and contain English letters (not Chinese)
-  return /^\d+[\.\。]\s*[A-Z]/.test(s) && s.length > 5;
+  if (s.length < 4) return false;
+  if (!/^\d+[\.\。]\s*/.test(s)) return false;
+  // Part after "123. " must contain at least 2 English letters
+  // This excludes "4. 双序列双指针" and "4.1 &双指针 &4.2 判断子序列"
+  const afterNum = s.replace(/^\d+[\.\。]\s*/, "");
+  const engLetters = (afterNum.match(/[a-zA-Z]/g) || []).length;
+  return engLetters >= 2;
 }
 
 // ========== Parse rows into problems ==========
@@ -30,11 +35,24 @@ function rowsToProblems(rows, headers) {
   // Header-based column matching
   const iApp = findCol(h, "解法+思路");
   const iComp = findCol(h, "复杂度", "complexity");
-  // Exact "难度" (not "难度/要点")
-  const iDiff = h.findIndex((v) => {
+  // Handle TWO "难度" columns: first = redo status, second = difficulty
+  console.log("[Import] Headers:", JSON.stringify(h));
+  const diffCols = [];
+  h.forEach((v, idx) => {
     const t = v.trim();
-    return (t === "难度" || t === "difficulty") && !t.includes("/");
+    if ((t === "难度" || t === "difficulty") && !t.includes("/")) {
+      diffCols.push(idx);
+    }
   });
+  let iRedo = -1;
+  let iDiff = -1;
+  if (diffCols.length >= 2) {
+    iRedo = diffCols[0];
+    iDiff = diffCols[1];
+  } else if (diffCols.length === 1) {
+    iDiff = diffCols[0];
+  }
+  const iRedo2 = findCol(h, "第二遍");
   const iKey = findCol(h, "难度/要点", "要点", "keypoints");
   const iCat = findCol(h, "题型", "category");
   // "思路" column — must match exact "思路", not "解法+思路"
@@ -52,10 +70,17 @@ function rowsToProblems(rows, headers) {
 
     const g = (idx) => (idx >= 0 && row[idx] != null ? String(row[idx]).trim() : "");
 
-    // Scan the row for the cell that looks like "1456. Maximum Number of Vowels..."
+    // Only look for title in columns named "题目" or "title", or fallback to scan
+    const titleCols = [];
+    h.forEach((v, idx) => {
+      if (v === "题目" || v === "title") titleCols.push(idx);
+    });
+
     let title = "";
     let titleIdx = -1;
-    for (let c = 0; c < Math.min(row.length, 12); c++) {
+
+    // First: check known title columns
+    for (const c of titleCols) {
       const val = row[c] != null ? String(row[c]).trim() : "";
       if (isLCTitle(val)) {
         title = val;
@@ -64,8 +89,24 @@ function rowsToProblems(rows, headers) {
       }
     }
 
+    // Fallback: scan first 12 columns only if no title columns found
+    if (!title && titleCols.length === 0) {
+      for (let c = 0; c < Math.min(row.length, 12); c++) {
+        const val = row[c] != null ? String(row[c]).trim() : "";
+        if (isLCTitle(val)) {
+          title = val;
+          titleIdx = c;
+          break;
+        }
+      }
+    }
+
     // Skip rows without a valid LC title (section headers, blank rows, etc.)
-    if (!title) continue;
+    if (!title) {
+      const rowPreview = row.slice(0, 6).map(c => String(c || "").slice(0, 20));
+      console.log("[Import] Skipped row", i, ":", JSON.stringify(rowPreview));
+      continue;
+    }
 
     // Parse category and subcategory from "思路" column: "滑动窗口----定长滑动窗口（注意...）"
     const approachRaw2 = g(iApproach2);
@@ -113,6 +154,7 @@ function rowsToProblems(rows, headers) {
       keyPoints: g(iKey) || "",
       approach: approach || "",
       pitfalls: g(iPit) || "",
+      redo: g(iRedo) || g(iRedo2) || "",
       interviewClarify: "",
       interviewBrute: "",
       interviewOptimal: "",

@@ -15,6 +15,72 @@ const COLORS = [
   { bg: "#55efc422", bd: "#2ecc71", tx: "#2ecc71" },
 ];
 
+const REVIEW_INTERVALS_LEN = 7;
+
+// Redo tag definitions with colors
+const REDO_TAGS = [
+  { key: "重做", label: "重做", color: "#e17055" },
+  { key: "没思路", label: "没思路", color: "#d63031" },
+  { key: "易出错", label: "易出错", color: "#fdcb6e" },
+  { key: "经典", label: "经典", color: "#6c5ce7" },
+  { key: "仅查看", label: "仅查看", color: "#636e72" },  // also matches "可以仅查看"
+  { key: "过", label: "过", color: "#00b894" },
+  { key: "难", label: "难", color: "#d63031" },
+];
+
+// Check if a problem matches a redo filter
+function matchesRedo(problem, redoFilter) {
+  if (!redoFilter) return true;
+  const redo = (problem.redo || "").trim();
+  if (!redo) return false;
+  return redo.includes(redoFilter);
+}
+
+// Get redo counts for a set of problems
+function getRedoCounts(problems) {
+  const counts = {};
+  for (const tag of REDO_TAGS) counts[tag.key] = 0;
+  for (const p of problems) {
+    const redo = (p.redo || "").trim();
+    if (!redo) continue;
+    for (const tag of REDO_TAGS) {
+      if (redo.includes(tag.key)) counts[tag.key]++;
+    }
+  }
+  return counts;
+}
+
+// Circle progress SVG
+function CircleProgress({ done, total, color, size = 44 }) {
+  const r = (size - 5) / 2;
+  const circ = 2 * Math.PI * r;
+  const pct = total > 0 ? done / total : 0;
+  return (
+    <svg width={size} height={size} style={{ flexShrink: 0 }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1a1a2e" strokeWidth={4} />
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={4}
+        strokeDasharray={circ} strokeDashoffset={circ * (1 - pct)} strokeLinecap="round"
+        style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dashoffset 0.5s" }} />
+      <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="central"
+        fill={color} fontSize={size * 0.26} fontWeight={700}>{done}</text>
+    </svg>
+  );
+}
+
+// Difficulty mini bar
+function DifficultyBar({ problems }) {
+  const counts = { Easy: 0, Medium: 0, Hard: 0 };
+  problems.forEach(p => { if (counts[p.difficulty] !== undefined) counts[p.difficulty]++; });
+  const total = problems.length || 1;
+  return (
+    <div className="rm-diff-bar">
+      {counts.Easy > 0 && <div className="rm-diff-seg rm-diff-easy" style={{ width: (counts.Easy / total * 100) + "%" }} title={`Easy: ${counts.Easy}`} />}
+      {counts.Medium > 0 && <div className="rm-diff-seg rm-diff-med" style={{ width: (counts.Medium / total * 100) + "%" }} title={`Medium: ${counts.Medium}`} />}
+      {counts.Hard > 0 && <div className="rm-diff-seg rm-diff-hard" style={{ width: (counts.Hard / total * 100) + "%" }} title={`Hard: ${counts.Hard}`} />}
+    </div>
+  );
+}
+
 export default function Roadmap() {
   const {
     problems, handleReview, toggleCompare, compareIds,
@@ -23,25 +89,39 @@ export default function Roadmap() {
 
   const [activeCat, setActiveCat] = useState("");
   const [expanded, setExpanded] = useState({});
+  const [redoFilter, setRedoFilter] = useState({}); // { [subKey]: "重做" | "经典" | ... | null }
 
-  // Build tree
   const tree = useMemo(() => buildRoadmapTree(problems, isDue), [problems]);
   const catKeys = useMemo(() => Object.keys(tree).sort(), [tree]);
-
-  // Auto-select first category
   const currentCat = activeCat && tree[activeCat] ? activeCat : catKeys[0] || "";
   const catData = tree[currentCat] || {};
   const subKeys = useMemo(() => sortSubKeys(Object.keys(catData)), [catData]);
   const stats = useMemo(() => getCategoryStats(catData), [catData]);
 
-  const toggle = (key) => setExpanded((p) => ({ ...p, [key]: !p[key] }));
+  // Global stats
+  const globalStats = useMemo(() => {
+    const mastered = problems.filter(p => p.reviewStage >= REVIEW_INTERVALS_LEN - 1).length;
+    const due = problems.filter(p => isDue(p.nextReview)).length;
+    return { total: problems.length, mastered, due, cats: catKeys.length };
+  }, [problems, catKeys]);
+
+  const toggle = (key) => setExpanded(p => ({ ...p, [key]: !p[key] }));
   const expandAll = () => {
     const a = {};
-    subKeys.forEach((k) => { a[k] = true; });
+    subKeys.forEach(k => { a[k] = true; });
     setExpanded(a);
   };
 
-  // Shared ProblemCard props builder
+  const catProblems = useMemo(() => subKeys.flatMap(k => catData[k]?.problems || []), [catData, subKeys]);
+  const catMastered = catProblems.filter(p => p.reviewStage >= REVIEW_INTERVALS_LEN - 1).length;
+
+  const toggleRedoFilter = (subKey, tag) => {
+    setRedoFilter(prev => ({
+      ...prev,
+      [subKey]: prev[subKey] === tag ? null : tag,
+    }));
+  };
+
   const cardProps = (p) => ({
     key: p.id,
     problem: p,
@@ -55,47 +135,71 @@ export default function Roadmap() {
     onDelete: () => deleteProblem(p.id),
   });
 
+  const catColorIdx = catKeys.indexOf(currentCat);
+  const catColor = COLORS[(catColorIdx >= 0 ? catColorIdx : 0) % COLORS.length];
+
   return (
     <div>
-      {/* Category tabs */}
-      <div className="roadmap-groups">
+      {/* ===== Global Stats ===== */}
+      <div className="rm-stats-row">
+        <div className="rm-stat-card">
+          <div className="rm-stat-value" style={{ color: "#6c5ce7" }}>{globalStats.total}</div>
+          <div className="rm-stat-label">Total</div>
+        </div>
+        <div className="rm-stat-card">
+          <div className="rm-stat-value" style={{ color: "#00b894" }}>{globalStats.mastered}</div>
+          <div className="rm-stat-label">Mastered</div>
+        </div>
+        <div className="rm-stat-card">
+          <div className="rm-stat-value" style={{ color: "#e17055" }}>{globalStats.due}</div>
+          <div className="rm-stat-label">Due Today</div>
+        </div>
+        <div className="rm-stat-card">
+          <div className="rm-stat-value" style={{ color: "#0984e3" }}>{globalStats.cats}</div>
+          <div className="rm-stat-label">Categories</div>
+        </div>
+      </div>
+
+      {/* ===== Category Tabs ===== */}
+      <div className="rm-cat-tabs">
         {catKeys.map((name, i) => {
           const c = COLORS[i % COLORS.length];
-          const catStats = getCategoryStats(tree[name]);
+          const catSt = getCategoryStats(tree[name]);
           const isActive = name === currentCat;
           return (
-            <button
-              key={name}
-              className={`roadmap-group-tab ${isActive ? "active" : ""}`}
-              style={{
-                borderColor: isActive ? c.bd : undefined,
-                background: isActive ? c.bg : undefined,
-                color: isActive ? c.tx : undefined,
-              }}
-              onClick={() => { setActiveCat(name); setExpanded({}); }}
+            <button key={name}
+              className={`rm-cat-tab ${isActive ? "active" : ""}`}
+              style={isActive ? { borderColor: c.bd, background: c.bg, color: c.tx } : {}}
+              onClick={() => { setActiveCat(name); setExpanded({}); setRedoFilter({}); }}
             >
-              {name}
-              <span className="roadmap-count">{catStats.total}</span>
-              {catStats.due > 0 && <span className="roadmap-due-badge">{catStats.due}</span>}
+              <span className="rm-cat-name">{name}</span>
+              <span className="rm-cat-count">{catSt.total}</span>
+              {catSt.due > 0 && <span className="rm-cat-due">{catSt.due}</span>}
             </button>
           );
         })}
       </div>
 
-      {/* Stats + controls */}
-      <div className="roadmap-controls">
-        <div className="roadmap-stats">
-          <span>{stats.total} problems</span>
-          <span className="roadmap-stats-dim">{stats.subCount} subcategories</span>
-          {stats.due > 0 && <span className="roadmap-due">{stats.due} due</span>}
+      {/* ===== Category Overview ===== */}
+      <div className="rm-cat-overview" style={{ borderColor: catColor.bd + "44" }}>
+        <div className="rm-cat-overview-left">
+          <CircleProgress done={catMastered} total={stats.total} color={catColor.bd} size={52} />
+          <div>
+            <div className="rm-cat-overview-title" style={{ color: catColor.tx }}>{currentCat}</div>
+            <div className="rm-cat-overview-meta">
+              {stats.total} problems · {stats.subCount} subcategories · {catMastered} mastered
+              {stats.due > 0 && <span className="rm-due-text"> · {stats.due} due</span>}
+            </div>
+            <DifficultyBar problems={catProblems} />
+          </div>
         </div>
-        <div className="roadmap-actions">
+        <div className="rm-cat-overview-actions">
           <button className="btn btn-muted btn-sm" onClick={expandAll}>Expand All</button>
           <button className="btn btn-muted btn-sm" onClick={() => setExpanded({})}>Collapse All</button>
         </div>
       </div>
 
-      {/* Subcategory sections */}
+      {/* ===== Subcategory Sections ===== */}
       {subKeys.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40, color: "#555" }}>
           No problems in this category yet.
@@ -106,47 +210,73 @@ export default function Roadmap() {
           const c = COLORS[idx % COLORS.length];
           const isOpen = expanded[subKey];
           const pCount = sub.problems.length;
+          const subMastered = sub.problems.filter(p => p.reviewStage >= REVIEW_INTERVALS_LEN - 1).length;
+          const subDue = sub.dueCount;
+          const activeRedo = redoFilter[subKey] || null;
+          const redoCounts = getRedoCounts(sub.problems);
+          const filteredProblems = activeRedo
+            ? sub.problems.filter(p => matchesRedo(p, activeRedo))
+            : sub.problems;
 
           return (
-            <div key={subKey} className="roadmap-section" style={{ borderColor: c.bd + "33" }}>
+            <div key={subKey} className={`rm-section ${isOpen ? "open" : ""}`} style={{ borderColor: c.bd + "33" }}>
               {/* Section header */}
-              <div className="roadmap-section-header" onClick={() => toggle(subKey)}>
-                <div className="roadmap-section-left">
-                  <div className="roadmap-section-icon" style={{ background: c.bg, color: c.tx }}>
-                    {idx + 1}
-                  </div>
+              <div className="rm-section-header" onClick={() => toggle(subKey)}>
+                <div className="rm-section-left">
+                  <CircleProgress done={subMastered} total={pCount} color={c.bd} size={38} />
                   <div>
-                    <div className="roadmap-section-title">{subKey}</div>
-                    <div className="roadmap-section-meta">
+                    <div className="rm-section-title">{subKey}</div>
+                    <div className="rm-section-meta">
                       {pCount} {pCount === 1 ? "problem" : "problems"}
-                      {sub.dueCount > 0 && (
-                        <span className="roadmap-due-sm"> · {sub.dueCount} due</span>
-                      )}
+                      {subMastered > 0 && <span className="rm-mastered-text"> · {subMastered} mastered</span>}
+                      {subDue > 0 && <span className="rm-due-text"> · {subDue} due</span>}
                     </div>
                   </div>
                 </div>
-                <div className="roadmap-section-right">
-                  <div className="roadmap-progress">
-                    <div
-                      className="roadmap-progress-bar"
-                      style={{
-                        width: `${(pCount / Math.max(stats.total, 1)) * 100}%`,
-                        background: c.bd,
-                      }}
-                    />
-                  </div>
-                  <span className="roadmap-section-count">{pCount}</span>
-                  <span className={`roadmap-arrow ${isOpen ? "open" : ""}`}>▶</span>
+                <div className="rm-section-right">
+                  <DifficultyBar problems={sub.problems} />
+                  <span className={`rm-arrow ${isOpen ? "open" : ""}`}>▶</span>
                 </div>
               </div>
 
-              {/* Problem cards */}
+              {/* Redo filter tags — shown when expanded */}
               {isOpen && (
-                <div className="roadmap-problems">
-                  {sub.problems.map((p) => (
-                    <ProblemCard {...cardProps(p)} />
-                  ))}
-                </div>
+                <>
+                  <div className="rm-redo-bar">
+                    <button
+                      className={`rm-redo-tag ${!activeRedo ? "active" : ""}`}
+                      style={!activeRedo ? { borderColor: "#888", color: "#ddd" } : {}}
+                      onClick={(e) => { e.stopPropagation(); setRedoFilter(prev => ({ ...prev, [subKey]: null })); }}
+                    >
+                      All {pCount}
+                    </button>
+                    {REDO_TAGS.map(tag => {
+                      const count = redoCounts[tag.key];
+                      if (count === 0) return null;
+                      const isActive = activeRedo === tag.key;
+                      return (
+                        <button key={tag.key}
+                          className={`rm-redo-tag ${isActive ? "active" : ""}`}
+                          style={isActive ? { borderColor: tag.color, color: tag.color, background: tag.color + "18" } : {}}
+                          onClick={(e) => { e.stopPropagation(); toggleRedoFilter(subKey, tag.key); }}
+                        >
+                          {tag.label} {count}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Problem cards */}
+                  <div className="rm-problems">
+                    {filteredProblems.length === 0 ? (
+                      <div style={{ padding: 12, color: "#555", fontSize: 12, textAlign: "center" }}>
+                        No problems match this filter.
+                      </div>
+                    ) : (
+                      filteredProblems.map(p => <ProblemCard {...cardProps(p)} />)
+                    )}
+                  </div>
+                </>
               )}
             </div>
           );
