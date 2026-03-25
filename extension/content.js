@@ -18,7 +18,7 @@
   const fetchProblemDetail = async (slug) => {
     const isCN = location.hostname.includes("leetcode.cn");
     const url = isCN ? "https://leetcode.cn/graphql" : "https://leetcode.com/graphql";
-    const query = `query($titleSlug:String!){question(titleSlug:$titleSlug){questionId title titleSlug difficulty topicTags{name slug}}}`;
+    const query = `query($titleSlug:String!){question(titleSlug:$titleSlug){questionId questionFrontendId title titleSlug difficulty topicTags{name slug}}}`;
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -245,8 +245,8 @@
 
     // Send to bridge.js via postMessage (bridge has chrome.runtime access)
     const payload = {
-      questionId: detail.questionId,
-      title: `${detail.questionId}. ${detail.title}`,
+      questionId: detail.questionFrontendId || detail.questionId,
+      title: `${detail.questionFrontendId || detail.questionId}. ${detail.title}`,
       titleSlug: detail.titleSlug,
       difficulty: detail.difficulty,
       tags: detail.topicTags.map((t) => t.name),

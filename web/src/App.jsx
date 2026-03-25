@@ -6,6 +6,7 @@ import ProblemList from "./pages/ProblemList";
 import ReviewMode from "./pages/ReviewMode";
 import CompareView from "./pages/CompareView";
 import AddProblem from "./pages/AddProblem";
+import Roadmap from "./pages/Roadmap";
 import "./App.css";
 
 function AppShell() {
@@ -16,6 +17,7 @@ function AppShell() {
 
   const tabs = [
     { id: "dashboard", label: "Dashboard" },
+    { id: "roadmap", label: "🗺️ Roadmap" },
     { id: "list", label: "Problems" },
     { id: "review", label: "Review", badge: dueCount },
     { id: "compare", label: "Compare", badge: compareIds.length },
@@ -37,6 +39,7 @@ function AppShell() {
       </header>
       <main className="container">
         {view === "dashboard" && <Dashboard onNavigate={setView} />}
+        {view === "roadmap" && <Roadmap />}
         {view === "list" && <ProblemList />}
         {view === "review" && <ReviewMode />}
         {view === "compare" && <CompareView onNavigate={setView} />}

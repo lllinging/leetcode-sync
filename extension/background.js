@@ -141,6 +141,53 @@ async function callOllama(data) {
     interviewOptimal: "", interviewWalkthrough: "",
   };
 
+  // Build prompt with category list
+  const categoryList = [
+    "滑动窗口", "单序列双指针", "双序列双指针",
+    "二分查找", "二分答案", "动态规划", "树", "图论",
+    "栈/队列", "贪心", "回溯", "哈希表", "链表",
+    "排序", "数学", "字符串", "位运算", "设计",
+  ].join(", ");
+
+  const prompt = [
+    "You are a LeetCode interview prep assistant.",
+    "Given the problem and user code, generate structured study notes.",
+    "",
+    "Problem: " + data.title,
+    "Difficulty: " + data.difficulty,
+    "Tags: " + data.tags.join(", "),
+    "User code (" + data.language + "):",
+    "```",
+    data.userCode,
+    "```",
+    "",
+    "Respond ONLY with a JSON object. No markdown, no extra text.",
+    "",
+    "Rules for the category field:",
+    "- Pick a main category from this list: " + categoryList,
+    "- If there is a clear subcategory, format as: 主类--子类",
+    "- Examples: 滑动窗口--定长滑动窗口, 单序列双指针--双向双指针, 二分查找--基础",
+    "- If unsure of subcategory, just use the main category, e.g. 滑动窗口",
+    "",
+    "Rules for language:",
+    "- category, approach, keyPoints, pitfalls: write in Chinese",
+    "- All interview fields: write in English",
+    "",
+    "JSON format:",
+    "{",
+    '  "category": "主类--子类 (see rules above)",',
+    '  "subCategory": "",',
+    '  "complexity": "O(n) / O(1)",',
+    '  "approach": "简洁的解题思路，2-3句中文",',
+    '  "keyPoints": "核心要点，1-2句中文",',
+    '  "pitfalls": "常见错误，1-2句中文",',
+    '  "interviewClarify": "2-3 clarifying questions in English",',
+    '  "interviewBrute": "Brute force approach, 2-3 sentences in English",',
+    '  "interviewOptimal": "Optimal approach, 3-4 sentences in English",',
+    '  "interviewWalkthrough": "Code walkthrough, 4-6 sentences in English"',
+    "}",
+  ].join("\n");
+
   try {
     const res = await fetch(CONFIG.ollamaUrl, {
       method: "POST",
@@ -149,40 +196,24 @@ async function callOllama(data) {
         model: CONFIG.ollamaModel,
         stream: false,
         options: { temperature: 0.3, num_predict: 2000 },
-        prompt: `You are a LeetCode interview prep assistant. Given the problem and user's accepted code, generate structured study notes AND a full interview walkthrough guide.
-
-Problem: ${data.title}
-Difficulty: ${data.difficulty}
-Tags: ${data.tags.join(", ")}
-User code (${data.language}):
-\`\`\`
-${data.userCode}
-\`\`\`
-
-Respond ONLY with a JSON object (no markdown, no extra text):
-{
-  "category": "main category (e.g. Sliding Window, Binary Search, DP, Graph, Tree, etc.)",
-  "subCategory": "sub-method (e.g. 1.1 Sliding Window, 2.1 Standard Binary Search)",
-  "complexity": "time and space, e.g. O(n) / O(1)",
-  "approach": "concise approach description, 2-3 sentences",
-  "keyPoints": "core takeaways, 1-2 sentences",
-  "pitfalls": "common mistakes, 1-2 sentences",
-  "interviewClarify": "2-3 short clarifying questions to ask interviewer before coding, e.g. 'Can the array contain duplicates?' Write as a short bullet list separated by newlines.",
-  "interviewBrute": "Briefly describe the brute force approach, its time/space complexity, and why it's suboptimal. 2-3 sentences.",
-  "interviewOptimal": "Explain the optimal approach to the interviewer: what data structure/algorithm to use, why it improves on brute force, and the time/space complexity. 3-4 sentences, as if speaking to interviewer before coding.",
-  "interviewWalkthrough": "Line-by-line or block-by-block walkthrough of the user's code as if explaining to interviewer while coding. Use short sentences like 'First I initialize a hashmap to store seen values. Then I iterate through the array...' Keep it concise, 4-6 sentences."
-}
-
-IMPORTANT: All interview fields must be in English. Be concise and natural — write as if actually speaking to an interviewer, not writing an essay.`,
+        prompt: prompt,
       }),
     });
 
-    if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
+    if (!res.ok) throw new Error("Ollama returned " + res.status);
 
     const d = await res.json();
     const raw = d.response || "";
+    console.log("[LC Sync BG] Ollama raw response:", raw.slice(0, 200));
+
     const m = raw.match(/\{[\s\S]*\}/);
-    if (m) return { ...defaults, ...JSON.parse(m[0]) };
+    if (m) {
+      const parsed = JSON.parse(m[0]);
+      console.log("[LC Sync BG] Parsed category:", parsed.category);
+      return { ...defaults, ...parsed };
+    } else {
+      console.warn("[LC Sync BG] No JSON found in Ollama response");
+    }
   } catch (e) {
     console.error("[LC Sync BG] Ollama error:", e);
   }
